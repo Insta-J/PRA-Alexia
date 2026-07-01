@@ -4,6 +4,11 @@ resource "proxmox_virtual_environment_vm" "pfsense" {
   node_name   = var.proxmox_node
   vm_id       = var.pfsense_vm_id
 
+  # Agent QEMU pour récupérer l'IP DHCP
+  agent {
+    enabled = true
+  }
+
   clone {
     vm_id = var.pfsense_template_id
     full  = true
@@ -52,4 +57,9 @@ resource "proxmox_virtual_environment_vm" "pfsense" {
 
 output "pfsense_vm_id" {
   value = proxmox_virtual_environment_vm.pfsense.vm_id
-} 
+}
+
+# IP détectée via l'agent QEMU (interface WAN/DHCP)
+output "pfsense_ip" {
+  value = try(proxmox_virtual_environment_vm.pfsense.ipv4_addresses[0][0], "IP non détectée")
+}
