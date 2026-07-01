@@ -1,0 +1,21 @@
+# Secrets et accès
+.env
+*.tfvars
+*.tfstate
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+
+# Données sensibles
+*.sql
+dumps/
+config-pfsense.xml
+*.gpg
+
+# Clés
+*.pem
+*.key
+.secrets/
+
+# OS
+.DS_Store
