@@ -1,0 +1,91 @@
+---
+- name: Configuration SSH + Installation de Vault (backend Raft)
+  hosts: vault
+  become: yes
+
+  tasks:
+    # --- Phase 1 : configurer SSH dans le LXC ---
+    - name: Autoriser le login root par mot de passe
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PermitRootLogin'
+        line: 'PermitRootLogin yes'
+
+    - name: Activer l'authentification par mot de passe
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PasswordAuthentication'
+        line: 'PasswordAuthentication yes'
+
+    - name: Redémarrer SSH
+      systemd:
+        name: ssh
+        state: restarted
+        enabled: yes
+
+    # --- Phase 2 : installer Vault ---
+    - name: Installer les dépendances
+      apt:
+        name: [gnupg, curl, unzip]
+        update_cache: yes
+
+    - name: Ajouter la clé GPG HashiCorp
+      shell: |
+        curl -fsSL https://apt.releases.hashicorp.com/gpg | \
+        gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+      args:
+        creates: /usr/share/keyrings/hashicorp-archive-keyring.gpg
+
+    - name: Ajouter le dépôt HashiCorp
+      apt_repository:
+        repo: "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com jammy main"
+        filename: hashicorp
+
+    - name: Installer Vault
+      apt:
+        name: vault
+        update_cache: yes
+
+    - name: Créer le répertoire de données Raft
+      file:
+        path: /opt/vault/data
+        state: directory
+        owner: vault
+        group: vault
+        mode: '0750'
+
+    # --- Phase 3 : configuration Vault en backend Raft ---
+    - name: Configurer Vault (backend Raft)
+      copy:
+        dest: /etc/vault.d/vault.hcl
+        content: |
+          storage "raft" {
+            path    = "/opt/vault/data"
+            node_id = "vault-node-1"
+          }
+
+          listener "tcp" {
+            address     = "0.0.0.0:8200"
+            tls_disable = 1
+          }
+
+          ui            = true
+          cluster_addr  = "http://192.168.50.4:8201"
+          api_addr      = "http://192.168.50.4:8200"
+          disable_mlock = true
+        owner: vault
+        group: vault
+        mode: '0640'
+      notify: restart vault
+
+    - name: Activer et démarrer Vault
+      systemd:
+        name: vault
+        enabled: yes
+        state: started
+
+  handlers:
+    - name: restart vault
+      systemd:
+        name: vault
+        state: restarted
