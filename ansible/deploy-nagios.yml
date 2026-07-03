@@ -1,0 +1,99 @@
+---
+- name: Installation et restauration de Nagios XI
+  hosts: nagios
+  become: yes
+
+  vars:
+    backup_file: "nagiosxi-20260701-1308.tar.gz"
+
+  tasks:
+    # --- Activer SSH pour le transfert ---
+    - name: Autoriser le login root par mot de passe
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PermitRootLogin'
+        line: 'PermitRootLogin yes'
+
+    - name: Activer l'authentification par mot de passe
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PasswordAuthentication'
+        line: 'PasswordAuthentication yes'
+
+    - name: Redémarrer SSH
+      systemd:
+        name: ssh
+        state: restarted
+        enabled: yes
+
+    # --- Installation de Nagios XI ---
+    - name: Installer les dépendances
+      apt:
+        name: [curl, wget, tar, gcc, make, sudo]
+        update_cache: yes
+
+    - name: Télécharger le script d'installation Nagios XI
+      get_url:
+        url: https://assets.nagios.com/downloads/nagiosxi/install.sh
+        dest: /tmp/nagiosxi-install.sh
+        mode: '0755'
+
+    - name: Installer Nagios XI (non interactif)
+      shell: bash /tmp/nagiosxi-install.sh --no-prompt
+      args:
+        creates: /usr/local/nagios
+      async: 1800
+      poll: 30
+
+    - name: Attendre que Nagios XI réponde
+      uri:
+        url: http://localhost/nagiosxi/
+        status_code: 200
+      retries: 10
+      delay: 15
+      ignore_errors: yes
+
+    # --- Restauration du backup ---
+    - name: Copier le backup dans le LXC
+      copy:
+        src: "files/{{ backup_file }}"
+        dest: "/tmp/{{ backup_file }}"
+
+    - name: Localiser le script de restauration
+      shell: find /usr/local -name "restore_xi.sh" 2>/dev/null | head -1
+      register: restore_script
+      changed_when: false
+
+    - name: Restaurer le backup Nagios XI
+      shell: "{{ restore_script.stdout }} /tmp/{{ backup_file }}"
+      when: restore_script.stdout != ""
+      register: restore_result
+
+    - name: Afficher le résultat de la restauration
+      debug:
+        var: restore_result.stdout_lines
+      when: restore_result is defined
+
+    # --- Réparation : aligner les mots de passe MySQL sur config.inc.php ---
+    - name: Aligner les mots de passe MySQL sur config.inc.php
+      shell: |
+        DBPASS=$(grep -oP "\"pwd\" => '\K[^']+" /usr/local/nagiosxi/html/config.inc.php | head -1)
+        mysql -u root <<EOF
+        ALTER USER 'nagiosxi'@'localhost' IDENTIFIED WITH mysql_native_password BY '$DBPASS';
+        ALTER USER 'ndoutils'@'localhost' IDENTIFIED WITH mysql_native_password BY '$DBPASS';
+        ALTER USER 'nagiosql'@'localhost' IDENTIFIED WITH mysql_native_password BY '$DBPASS';
+        FLUSH PRIVILEGES;
+        EOF
+      ignore_errors: yes
+
+    # --- Réparation des bases ---
+    - name: Réparer les bases de données Nagios
+      shell: /usr/local/nagiosxi/scripts/repair_databases.sh
+      ignore_errors: yes
+
+    # --- Redémarrage des services ---
+    - name: Redémarrer les services après alignement
+      shell: |
+        systemctl restart nagios
+        systemctl restart apache2 || systemctl restart httpd
+      ignore_errors: yes
