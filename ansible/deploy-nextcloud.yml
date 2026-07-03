@@ -1,0 +1,159 @@
+---
+- name: Installation Nextcloud + MariaDB
+  hosts: nextcloud
+  become: yes
+
+  vars:
+    db_root_password: "{{ lookup('env', 'NC_DB_ROOT_PASSWORD') }}"
+    db_user: "{{ lookup('env', 'NC_DB_USER') }}"
+    db_password: "{{ lookup('env', 'NC_DB_PASSWORD') }}"
+    admin_user: "{{ lookup('env', 'NC_ADMIN_USER') }}"
+    admin_password: "{{ lookup('env', 'NC_ADMIN_PASSWORD') }}"
+
+  tasks:
+    # --- SSH ---
+    - name: Autoriser le login root
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PermitRootLogin'
+        line: 'PermitRootLogin yes'
+
+    - name: Redémarrer SSH
+      systemd:
+        name: ssh
+        state: restarted
+        enabled: yes
+
+    # --- Ajouter le PPA PHP 8.2 ---
+    - name: Installer les prérequis pour le PPA
+      apt:
+        name: [software-properties-common, ca-certificates, lsb-release, apt-transport-https]
+        update_cache: yes
+
+    - name: Ajouter le PPA PHP (Ondřej Surý)
+      apt_repository:
+        repo: "ppa:ondrej/php"
+        state: present
+
+    - name: Mettre à jour le cache après ajout du PPA
+      apt:
+        update_cache: yes
+
+    # --- Dépendances : Apache, PHP 8.2, MariaDB ---
+    - name: Installer les paquets
+      apt:
+        name:
+          - apache2
+          - mariadb-server
+          - libapache2-mod-php8.2
+          - php8.2
+          - php8.2-gd
+          - php8.2-mysql
+          - php8.2-curl
+          - php8.2-mbstring
+          - php8.2-intl
+          - php8.2-gmp
+          - php8.2-bcmath
+          - php8.2-xml
+          - php8.2-imagick
+          - php8.2-zip
+          - unzip
+          - wget
+          - python3-pymysql
+        update_cache: yes
+
+    - name: Activer PHP 8.2 pour Apache
+      shell: |
+        a2dismod php8.1 2>/dev/null || true
+        a2enmod php8.2
+      ignore_errors: yes
+
+    # --- Configuration MariaDB ---
+    - name: Définir le mot de passe root MariaDB
+      mysql_user:
+        name: root
+        password: "{{ db_root_password }}"
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        state: present
+      ignore_errors: yes
+
+    - name: Créer la base Nextcloud
+      mysql_db:
+        name: nextcloud
+        state: present
+        login_user: root
+        login_password: "{{ db_root_password }}"
+
+    - name: Créer l'utilisateur Nextcloud
+      mysql_user:
+        name: "{{ db_user }}"
+        password: "{{ db_password }}"
+        priv: "nextcloud.*:ALL"
+        host: localhost
+        state: present
+        login_user: root
+        login_password: "{{ db_root_password }}"
+
+    # --- Télécharger et installer Nextcloud ---
+    - name: Télécharger Nextcloud
+      get_url:
+        url: https://download.nextcloud.com/server/releases/latest.zip
+        dest: /tmp/nextcloud.zip
+
+    - name: Décompresser Nextcloud (unzip natif sur le LXC)
+      shell: unzip -o -q /tmp/nextcloud.zip -d /var/www/
+      args:
+        creates: /var/www/nextcloud
+
+    - name: Définir les permissions
+      file:
+        path: /var/www/nextcloud
+        owner: www-data
+        group: www-data
+        recurse: yes
+
+    # --- Configurer Apache ---
+    - name: Créer le vhost Apache
+      copy:
+        dest: /etc/apache2/sites-available/nextcloud.conf
+        content: |
+          <VirtualHost *:80>
+            DocumentRoot /var/www/nextcloud
+            <Directory /var/www/nextcloud>
+              Require all granted
+              AllowOverride All
+              Options FollowSymLinks MultiViews
+            </Directory>
+          </VirtualHost>
+
+    - name: Activer le site et les modules
+      shell: |
+        a2ensite nextcloud.conf
+        a2enmod rewrite headers env dir mime
+        a2dissite 000-default.conf
+      ignore_errors: yes
+
+    - name: Redémarrer Apache
+      systemd:
+        name: apache2
+        state: restarted
+
+    # --- Installation Nextcloud via occ ---
+    - name: Installer Nextcloud (occ)
+      become_user: www-data
+      shell: |
+        php /var/www/nextcloud/occ maintenance:install \
+          --database "mysql" \
+          --database-name "nextcloud" \
+          --database-user "{{ db_user }}" \
+          --database-pass "{{ db_password }}" \
+          --admin-user "{{ admin_user }}" \
+          --admin-pass "{{ admin_password }}"
+      args:
+        creates: /var/www/nextcloud/config/config.php
+
+    - name: Autoriser l'accès depuis le réseau (trusted domains)
+      become_user: www-data
+      shell: |
+        php /var/www/nextcloud/occ config:system:set trusted_domains 1 --value="192.168.40.50"
+      ignore_errors: yes
