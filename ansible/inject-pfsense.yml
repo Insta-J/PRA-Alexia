@@ -1,9 +1,14 @@
 ---
+# --- BLOC D'ENTÊTE DU PLAY (SCÉNARIO) ---
+# Définit la cible (le groupe d'hôtes pfsense) et désactive la collecte de données système (gather_facts) pour accélérer le lancement.
 - name: Injection de la configuration pfSense complète
   hosts: pfsense
   gather_facts: no
 
+  # --- BLOC DES TÂCHES (TASKS) ---
+  # Contient la liste chronologique des actions que le playbook va exécuter sur la cible.
   tasks:
+    # Bloc/Module de transfert de fichier : écrase la configuration par défaut de pfSense avec ton fichier xml local.
     - name: Copier le config.xml complet vers pfSense
       copy:
         src: files/config-pfsense.xml
@@ -12,6 +17,8 @@
         group: wheel
         mode: '0644'
 
+    # Bloc/Module d'exécution de commande : déclenche le reboot requis par pfSense pour appliquer les changements.
+    # Les paramètres asynchrones évitent que le playbook ne se bloque lors de la coupure de la connexion SSH.
     - name: Redémarrer pfSense pour appliquer la config
       shell: /etc/rc.reboot
       async: 1
