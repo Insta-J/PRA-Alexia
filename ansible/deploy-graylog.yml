@@ -16,7 +16,7 @@
     ncpa_token: "{{ lookup('env', 'GL_NCPA_TOKEN') }}"
 
   tasks:
-    # === Vérifier que les secrets ne sont pas vides ===
+    # == Vérifier que les secrets ne sont pas vides ===
     - name: Vérifier que les secrets Graylog sont fournis
       fail:
         msg: >
