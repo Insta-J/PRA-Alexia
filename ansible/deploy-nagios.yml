@@ -14,7 +14,7 @@
     nas_path_nagios: "{{ lookup('env', 'NAS_PATH_NAGIOS') }}"
 
   tasks:
-    # --- Activer SSH ---
+    # -- Activer SSH --
     - name: Autoriser le login root par mot de passe
       lineinfile:
         path: /etc/ssh/sshd_config
