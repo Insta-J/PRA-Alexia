@@ -1,0 +1,34 @@
+---
+- name: Restauration du snapshot Vault
+  hosts: vault
+  become: yes
+
+  vars:
+    vault_addr: "http://127.0.0.1:8200"
+    snapshot_file: "vault-snapshot.snap"
+
+  tasks:
+    - name: Copier le snapshot vers le LXC
+      copy:
+        src: "files/{{ snapshot_file }}"
+        dest: "/tmp/{{ snapshot_file }}"
+
+    - name: Vérifier l'état de Vault
+      shell: VAULT_ADDR={{ vault_addr }} vault status -format=json
+      register: vault_status
+      failed_when: false
+      changed_when: false
+
+    - name: Message si Vault non initialisé
+      debug:
+        msg: >
+          Vault doit être initialisé et déverrouillé manuellement AVANT
+          la restauration (vault operator init + unseal).
+          Voir le runbook.
+
+    - name: Restaurer le snapshot (nécessite Vault déverrouillé + login)
+      shell: |
+        export VAULT_ADDR={{ vault_addr }}
+        export VAULT_TOKEN={{ vault_root_token }}
+        vault operator raft snapshot restore -force /tmp/{{ snapshot_file }}
+      when: vault_root_token is defined

@@ -1,0 +1,73 @@
+---
+- name: Restauration des données Nextcloud - Phase 1 (Connexion dynamique)
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  vars:
+    mariadb_ip: "{{ lookup('env', 'MARIADB_IP') }}"
+    mariadb_lxc_password: "{{ lookup('env', 'MARIADB_LXC_PASSWORD') }}"
+
+  tasks:
+    - name: Ajouter dynamiquement l'hôte MariaDB à l'inventaire d'Ansible
+      add_host:
+        name: "{{ mariadb_ip }}"
+        groups: remote_mariadb
+        ansible_user: root
+        ansible_password: "{{ mariadb_lxc_password }}"
+        ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+
+
+- name: Restauration des données Nextcloud - Phase 2 (Base de données)
+  hosts: remote_mariadb
+  gather_facts: no
+  vars:
+    db_root_password: "{{ lookup('env', 'DB_ROOT_PASSWORD') }}"
+    db_name: "{{ lookup('env', 'DB_NAME') | default('nextcloud', true) }}"
+
+  tasks:
+    - name: Copier le dump SQL sur le serveur MariaDB
+      copy:
+        src: "{{ playbook_dir }}/files/nextcloud-latest.sql.gz"
+        dest: /tmp/nextcloud-latest.sql.gz
+        mode: '0640'
+
+    - name: Restaurer la base de données (via l'outil système local)
+      shell: "zcat /tmp/nextcloud-latest.sql.gz | mysql -u root -p'{{ db_root_password }}' {{ db_name }}"
+      no_log: true # Évite d'afficher le mot de passe root dans les logs Ansible
+
+    - name: Vérifier les utilisateurs restaurés en BDD
+      shell: "mysql -u root -p'{{ db_root_password }}' {{ db_name }} -e 'SELECT uid FROM oc_users;'"
+      register: users_check
+      no_log: true
+
+    - name: Afficher les utilisateurs trouvés en BDD
+      debug:
+        var: users_check.stdout_lines
+
+- name: Restauration des données Nextcloud - Phase 3 (Finalisation Nextcloud)
+  hosts: nextcloud
+  become: yes
+
+  tasks:
+    - name: Créer le marqueur .ncdata
+      copy:
+        content: "# Nextcloud data directory\n"
+        dest: /var/www/nextcloud/data/.ncdata
+        owner: www-data
+        group: www-data
+        mode: '0644'
+
+    - name: Scanner les fichiers Nextcloud
+      become_user: www-data
+      shell: php /var/www/nextcloud/occ files:scan --all
+      ignore_errors: yes
+
+    - name: Lister les utilisateurs via OCC
+      become_user: www-data
+      shell: php /var/www/nextcloud/occ user:list
+      register: users
+      ignore_errors: yes
+
+    - name: Afficher les utilisateurs Nextcloud (OCC)
+      debug:
+        var: users.stdout_lines

@@ -1,0 +1,298 @@
+---
+- name: Installation et restauration de Graylog
+  hosts: graylog
+  become: yes
+
+  vars:
+    password_secret: "{{ lookup('env', 'GL_PASSWORD_SECRET') }}"
+    root_password_sha2: "{{ lookup('env', 'GL_ROOT_SHA2') }}"
+    mongodb_uri: "{{ lookup('env', 'GL_MONGODB_URI') }}"
+    mongo_user: "{{ lookup('env', 'GL_MONGO_USER') }}"
+    mongo_password: "{{ lookup('env', 'GL_MONGO_PASSWORD') }}"
+    nas_host: "{{ lookup('env', 'NAS_HOST') }}"
+    nas_user: "{{ lookup('env', 'NAS_USER') }}"
+    nas_pwd: "{{ lookup('env', 'NAS_PWD') }}"
+    nas_path: "{{ lookup('env', 'NAS_PATH') }}"
+    ncpa_token: "{{ lookup('env', 'GL_NCPA_TOKEN') }}"
+
+  tasks:
+    # === Vérifier que les secrets ne sont pas vides ===
+    - name: Vérifier que les secrets Graylog sont fournis
+      fail:
+        msg: >
+          Un secret est vide ! Exportez les variables avant de lancer :
+          GL_PASSWORD_SECRET, GL_MONGODB_URI, GL_ROOT_SHA2, GL_MONGO_USER, GL_MONGO_PASSWORD.
+      when: >
+        password_secret == "" or
+        mongodb_uri == "" or
+        root_password_sha2 == "" or
+        mongo_user == "" or
+        mongo_password == ""
+
+    # === SSH ===
+    - name: Autoriser le login root
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PermitRootLogin'
+        line: 'PermitRootLogin yes'
+
+    - name: Redémarrer SSH
+      systemd:
+        name: ssh
+        state: restarted
+        enabled: yes
+
+    # === Heure et Synchronisation ===
+    - name: Configurer le fuseau horaire sur UTC
+      timezone:
+        name: UTC
+
+    # === Dépendances de base ===
+    - name: Installer les prérequis (dont chrony pour l'heure)
+      apt:
+        name:
+          - curl
+          - wget
+          - gnupg
+          - apt-transport-https
+          - ca-certificates
+          - sshpass
+          - pwgen
+          - openjdk-17-jre-headless
+          - chrony
+        update_cache: yes
+
+    - name: S'assurer que chrony est démarré et activé
+      systemd:
+        name: chrony
+        state: started
+        enabled: yes
+
+    # === MongoDB 8.0 ===
+    - name: Clé GPG MongoDB 8.0
+      shell: |
+        curl -fsSL https://www.mongodb.org/static/pgp/server-8.0.asc | \
+        gpg -o /usr/share/keyrings/mongodb-server-8.0.gpg --dearmor --yes
+      args:
+        creates: /usr/share/keyrings/mongodb-server-8.0.gpg
+
+    - name: Dépôt MongoDB 8.0
+      apt_repository:
+        repo: "deb [signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg] https://repo.mongodb.org/apt/ubuntu noble/mongodb-org/8.0 multiverse"
+        state: present
+        filename: mongodb-org-8.0
+
+    - name: Installer MongoDB
+      apt:
+        name: mongodb-org
+        update_cache: yes
+
+    - name: Démarrer MongoDB
+      systemd:
+        name: mongod
+        state: started
+        enabled: yes
+
+    - name: Attendre MongoDB (démarrage initial)
+      pause:
+        seconds: 5
+
+    # === Graylog 7.1 ===
+    - name: Télécharger le dépôt Graylog 7.1
+      get_url:
+        url: https://packages.graylog2.org/repo/packages/graylog-7.1-repository_latest.deb
+        dest: /tmp/graylog-repo.deb
+
+    - name: Installer le dépôt Graylog
+      apt:
+        deb: /tmp/graylog-repo.deb
+
+    - name: Installer graylog-server et datanode
+      apt:
+        name:
+          - graylog-server
+          - graylog-datanode
+        update_cache: yes
+
+    # === MongoDB : créer l'utilisateur applicatif ===
+    - name: Créer l'utilisateur MongoDB grayloguser
+      shell: |
+        mongosh admin --eval '
+        db.createUser({
+          user: "{{ mongo_user }}",
+          pwd: "{{ mongo_password }}",
+          roles: [{role: "readWrite", db: "graylog"}, {role: "dbAdmin", db: "graylog"}]
+        })'
+      ignore_errors: yes
+
+    # === Activer l'auth MongoDB ===
+    - name: Retirer toute section security existante
+      replace:
+        path: /etc/mongod.conf
+        regexp: '(?m)^security:\s*\n\s*authorization:.*$\n?'
+        replace: ''
+
+    - name: Retirer un éventuel bloc GRAYLOG AUTH précédent
+      blockinfile:
+        path: /etc/mongod.conf
+        marker: "# {mark} GRAYLOG AUTH"
+        state: absent
+
+    - name: Activer l'authentification MongoDB
+      blockinfile:
+        path: /etc/mongod.conf
+        block: |
+          security:
+            authorization: enabled
+        marker: "# {mark} GRAYLOG AUTH"
+
+    - name: Redémarrer MongoDB avec auth
+      systemd:
+        name: mongod
+        state: restarted
+
+    - name: Attendre MongoDB (avec auth)
+      pause:
+        seconds: 10
+
+    # === Récupérer et restaurer le backup ===
+    - name: Trouver le dernier backup MongoDB sur le NAS
+      shell: |
+        sshpass -p '{{ nas_pwd }}' ssh -o StrictHostKeyChecking=no {{ nas_user }}@{{ nas_host }} \
+          "ls -t {{ nas_path }}/graylog-mongo-*.tar.gz | head -1"
+      register: latest_backup
+      changed_when: false
+
+    - name: Afficher le backup sélectionné
+      debug:
+        msg: "Dernier backup : {{ latest_backup.stdout }}"
+
+    - name: Copier le dernier mongodump depuis le NAS
+      shell: |
+        BACKUP_REL=$(echo "{{ latest_backup.stdout }}" | sed 's|^/volume1/||')
+        sshpass -p '{{ nas_pwd }}' scp -o StrictHostKeyChecking=no \
+          {{ nas_user }}@{{ nas_host }}:"$BACKUP_REL" \
+          /tmp/graylog-mongo-latest.tar.gz
+      args:
+        creates: /tmp/graylog-mongo-latest.tar.gz
+
+    - name: Décompresser le mongodump
+      shell: tar -xzf /tmp/graylog-mongo-latest.tar.gz -C /tmp/
+      args:
+        creates: /tmp/mongodump
+
+    - name: Restaurer la base Graylog (mongorestore)
+      shell: |
+        DUMP_DIR=$(find /tmp -type d -name graylog -path "*mongodump*" | head -1)
+        mongorestore --uri="{{ mongodb_uri }}" --drop "$DUMP_DIR"
+      register: restore_result
+      ignore_errors: yes
+
+    - name: Afficher le résultat mongorestore
+      debug:
+        var: restore_result.stdout_lines
+
+    # === Configuration server.conf ===
+    - name: Copier server.conf depuis le NAS
+      shell: |
+        CONF_REL=$(echo "{{ nas_path }}/server.conf" | sed 's|^/volume1/||')
+        sshpass -p '{{ nas_pwd }}' scp -o StrictHostKeyChecking=no \
+          {{ nas_user }}@{{ nas_host }}:"$CONF_REL" \
+          /etc/graylog/server/server.conf
+
+    - name: Réinjecter password_secret (server.conf)
+      replace:
+        path: /etc/graylog/server/server.conf
+        regexp: 'VAULT_PASSWORD_SECRET'
+        replace: "{{ password_secret }}"
+
+    - name: Réinjecter root_password_sha2 (server.conf)
+      replace:
+        path: /etc/graylog/server/server.conf
+        regexp: 'VAULT_ROOT_PASSWORD_SHA2'
+        replace: "{{ root_password_sha2 }}"
+
+    - name: Réinjecter mongodb_uri (server.conf)
+      replace:
+        path: /etc/graylog/server/server.conf
+        regexp: 'VAULT_MONGODB_URI'
+        replace: "{{ mongodb_uri }}"
+
+    # === Configuration datanode.conf ===
+    - name: Injecter mongodb_uri dans datanode.conf
+      lineinfile:
+        path: /etc/graylog/datanode/datanode.conf
+        regexp: '^mongodb_uri\s*='
+        line: "mongodb_uri = {{ mongodb_uri }}"
+        create: yes
+
+    - name: Injecter password_secret dans datanode.conf
+      lineinfile:
+        path: /etc/graylog/datanode/datanode.conf
+        regexp: '^password_secret\s*='
+        line: "password_secret = {{ password_secret }}"
+        create: yes
+
+    - name: Injecter root_password_sha2 dans datanode.conf
+      lineinfile:
+        path: /etc/graylog/datanode/datanode.conf
+        regexp: '^root_password_sha2\s*='
+        line: "root_password_sha2 = {{ root_password_sha2 }}"
+        create: yes
+
+    - name: Configurer le Heap Size Java à 8go pour OpenSearch (Data Node)
+      lineinfile:
+        path: /etc/graylog/datanode/datanode.conf
+        regexp: '^opensearch_heap\s*='
+        line: "opensearch_heap = 8g"
+        create: yes
+
+    # === Démarrage des Services ===
+    - name: Vérifier mongodb_uri dans server.conf
+      shell: grep '^mongodb_uri = mongodb' /etc/graylog/server/server.conf
+
+    - name: Démarrer le datanode
+      systemd:
+        name: graylog-datanode
+        state: started
+        enabled: yes
+
+    - name: Attendre qu'OpenSearch soit prêt (90s)
+      pause:
+        seconds: 90
+
+    - name: Démarrer graylog-server
+      systemd:
+        name: graylog-server
+        state: started
+        enabled: yes
+
+    # === Agent NCPA (supervision) ===
+    - name: Télécharger NCPA
+      get_url:
+        url: "https://assets.nagios.com/downloads/ncpa3/ncpa-latest-1.amd64.deb"
+        dest: /tmp/ncpa.deb
+
+    - name: Installer NCPA
+      apt:
+        deb: /tmp/ncpa.deb
+
+    - name: Configurer le token NCPA
+      lineinfile:
+        path: /usr/local/ncpa/etc/ncpa.cfg
+        regexp: '^community_string\s*='
+        line: "community_string = {{ ncpa_token }}"
+        create: yes
+      notify: restart ncpa
+
+    - name: Démarrer et activer NCPA
+      systemd:
+        name: ncpa
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: restart ncpa
+      systemd:
+        name: ncpa
+        state: restarted

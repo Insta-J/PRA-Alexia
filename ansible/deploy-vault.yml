@@ -3,7 +3,21 @@
   hosts: vault
   become: yes
 
+  vars:
+    ncpa_token: "{{ lookup('env', 'VAULT_NCPA_TOKEN') }}"
+
   tasks:
+    # --- Phase 0 : Validation Réseau ---
+    - name: Détecter la passerelle par défaut du LXC
+      shell: ip route | grep default | awk '{print $3}'
+      register: default_gateway
+      changed_when: false
+
+    - name: Effectuer un ping de 5 paquets vers la passerelle
+      shell: ping -c 5 {{ default_gateway.stdout | default('192.168.50.254') }}
+      register: ping_result
+      changed_when: false
+
     # --- Phase 1 : configurer SSH dans le LXC ---
     - name: Autoriser le login root par mot de passe
       lineinfile:
@@ -63,12 +77,10 @@
             path    = "/opt/vault/data"
             node_id = "vault-node-1"
           }
-
           listener "tcp" {
             address     = "0.0.0.0:8200"
             tls_disable = 1
           }
-
           ui            = true
           cluster_addr  = "http://192.168.50.4:8201"
           api_addr      = "http://192.168.50.4:8200"
@@ -84,8 +96,38 @@
         enabled: yes
         state: started
 
+    # --- Phase 4 : Agent NCPA (supervision par Nagios) ---
+    - name: Télécharger NCPA
+      get_url:
+        url: "https://assets.nagios.com/downloads/ncpa3/ncpa-latest-1.amd64.deb"
+        dest: /tmp/ncpa.deb
+
+    - name: Installer NCPA
+      apt:
+        deb: /tmp/ncpa.deb
+
+    - name: Configurer le token NCPA (section api)
+      community.general.ini_file:
+        path: /usr/local/ncpa/etc/ncpa.cfg
+        section: api
+        option: community_string
+        value: "{{ ncpa_token }}"
+        no_extra_spaces: yes
+      notify: restart ncpa
+
+    - name: Démarrer et activer NCPA
+      systemd:
+        name: ncpa
+        state: started
+        enabled: yes
+
   handlers:
     - name: restart vault
       systemd:
         name: vault
+        state: restarted
+
+    - name: restart ncpa
+      systemd:
+        name: ncpa
         state: restarted

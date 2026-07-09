@@ -4,10 +4,17 @@
   become: yes
 
   vars:
-    backup_file: "nagiosxi-20260701-1308.tar.gz"
+    ansible_account_password: "{{ lookup('env', 'ANSIBLE_ACCOUNT_PASSWORD') }}"
+    graylog_ip: "{{ lookup('env', 'GRAYLOG_IP') }}"
+    graylog_ip_secondaire: "{{ lookup('env', 'GRAYLOG_IP_SECONDAIRE') }}"
+    ncpa_token: "{{ lookup('env', 'GL_NCPA_TOKEN') }}"
+    nas_host: "{{ lookup('env', 'NAS_HOST') }}"
+    nas_user: "{{ lookup('env', 'NAS_USER') }}"
+    nas_pwd: "{{ lookup('env', 'NAS_PWD') }}"
+    nas_path_nagios: "{{ lookup('env', 'NAS_PATH_NAGIOS') }}"
 
   tasks:
-    # --- Activer SSH pour le transfert ---
+    # --- Activer SSH ---
     - name: Autoriser le login root par mot de passe
       lineinfile:
         path: /etc/ssh/sshd_config
@@ -29,7 +36,7 @@
     # --- Installation de Nagios XI ---
     - name: Installer les dépendances
       apt:
-        name: [curl, wget, tar, gcc, make, sudo]
+        name: [curl, wget, tar, gcc, make, sudo, sshpass]
         update_cache: yes
 
     - name: Télécharger le script d'installation Nagios XI
@@ -53,19 +60,69 @@
       delay: 15
       ignore_errors: yes
 
-    # --- Restauration du backup ---
-    - name: Copier le backup dans le LXC
-      copy:
-        src: "files/{{ backup_file }}"
-        dest: "/tmp/{{ backup_file }}"
+    # --- Créer le compte ansible dédié (moindre privilège) ---
+    - name: Créer le compte ansible
+      user:
+        name: ansible
+        password: "{{ ansible_account_password | password_hash('sha512') }}"
+        shell: /bin/bash
+        create_home: yes
 
+    - name: Créer le répertoire de réception des backups
+      file:
+        path: /home/ansible/backups
+        state: directory
+        owner: ansible
+        group: ansible
+        mode: '0750'
+
+    - name: Restreindre les droits sudo du compte ansible
+      copy:
+        dest: /etc/sudoers.d/ansible
+        content: |
+          ansible ALL=(ALL) NOPASSWD: /usr/local/nagiosxi/scripts/restore_xi.sh
+          ansible ALL=(ALL) NOPASSWD: /usr/local/nagiosxi/scripts/repair_databases.sh
+          ansible ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart nagios
+          ansible ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart apache2
+          ansible ALL=(ALL) NOPASSWD: /usr/bin/mysql
+        mode: '0440'
+        validate: 'visudo -cf %s'
+
+    # === Détecter et récupérer le DERNIER backup Nagios depuis le NAS ===
+    - name: Trouver le dernier backup Nagios sur le NAS
+      shell: |
+        sshpass -p '{{ nas_pwd }}' ssh -o StrictHostKeyChecking=no {{ nas_user }}@{{ nas_host }} \
+          "ls -t {{ nas_path_nagios }}/nagiosxi-*.tar.gz | head -1"
+      register: latest_backup
+      changed_when: false
+
+    - name: Afficher le backup sélectionné
+      debug:
+        msg: "Dernier backup Nagios : {{ latest_backup.stdout }}"
+
+    - name: Copier le dernier backup depuis le NAS (chemin absolu)
+      shell: |
+        sshpass -p '{{ nas_pwd }}' scp -o StrictHostKeyChecking=no \
+          {{ nas_user }}@{{ nas_host }}:"{{ latest_backup.stdout }}" \
+          /home/ansible/backups/nagiosxi-latest.tar.gz
+      args:
+        creates: /home/ansible/backups/nagiosxi-latest.tar.gz
+
+    - name: Ajuster les permissions du backup
+      file:
+        path: /home/ansible/backups/nagiosxi-latest.tar.gz
+        owner: ansible
+        group: ansible
+        mode: '0640'
+
+    # --- Restauration ---
     - name: Localiser le script de restauration
       shell: find /usr/local -name "restore_xi.sh" 2>/dev/null | head -1
       register: restore_script
       changed_when: false
 
     - name: Restaurer le backup Nagios XI
-      shell: "{{ restore_script.stdout }} /tmp/{{ backup_file }}"
+      shell: "{{ restore_script.stdout }} /home/ansible/backups/nagiosxi-latest.tar.gz"
       when: restore_script.stdout != ""
       register: restore_result
 
@@ -74,26 +131,62 @@
         var: restore_result.stdout_lines
       when: restore_result is defined
 
-    # --- Réparation : aligner les mots de passe MySQL sur config.inc.php ---
+    # --- Aligner les mots de passe MySQL sur config.inc.php ---
     - name: Aligner les mots de passe MySQL sur config.inc.php
       shell: |
         DBPASS=$(grep -oP "\"pwd\" => '\K[^']+" /usr/local/nagiosxi/html/config.inc.php | head -1)
-        mysql -u root <<EOF
+        ROOTPASS=$(grep -oP "mysqlpass=\K.*" /usr/local/nagiosxi/etc/xi-sys.cfg)
+        mysql -u root -p"$ROOTPASS" <<EOF
         ALTER USER 'nagiosxi'@'localhost' IDENTIFIED WITH mysql_native_password BY '$DBPASS';
-        ALTER USER 'ndoutils'@'localhost' IDENTIFIED WITH mysql_native_password BY '$DBPASS';
         ALTER USER 'nagiosql'@'localhost' IDENTIFIED WITH mysql_native_password BY '$DBPASS';
+        ALTER USER 'ndoutils'@'localhost' IDENTIFIED WITH mysql_native_password BY '$DBPASS';
         FLUSH PRIVILEGES;
         EOF
       ignore_errors: yes
 
-    # --- Réparation des bases ---
+    # --- Réparer les bases ---
     - name: Réparer les bases de données Nagios
       shell: /usr/local/nagiosxi/scripts/repair_databases.sh
       ignore_errors: yes
 
-    # --- Redémarrage des services ---
-    - name: Redémarrer les services après alignement
+    # --- Redémarrer les services ---
+    - name: Redémarrer les services Nagios
       shell: |
         systemctl restart nagios
         systemctl restart apache2 || systemctl restart httpd
       ignore_errors: yes
+
+    # === Configuration rsyslog → Graylog ===
+    - name: Installer rsyslog
+      apt:
+        name: rsyslog
+        state: present
+
+    - name: Configurer rsyslog pour envoyer les logs Nagios vers Graylog
+      copy:
+        dest: /etc/rsyslog.d/90-graylog.conf
+        content: |
+          module(load="imfile")
+          input(type="imfile"
+                File="/usr/local/nagios/var/nagios.log"
+                Tag="nagios"
+                Severity="info"
+                Facility="local7")
+          local7.* @{{ graylog_ip }}:5515
+          local7.* @{{ graylog_ip_secondaire }}:5515
+        mode: '0644'
+
+    - name: Redémarrer rsyslog
+      systemd:
+        name: rsyslog
+        state: restarted
+        enabled: yes
+
+    # === Plugin check_ncpa.py (superviser les agents NCPA) ===
+    - name: Installer le plugin check_ncpa.py
+      get_url:
+        url: "https://raw.githubusercontent.com/NagiosEnterprises/ncpa/master/client/check_ncpa.py"
+        dest: /usr/local/nagios/libexec/check_ncpa.py
+        mode: '0755'
+        owner: nagios
+        group: nagios

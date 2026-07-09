@@ -1,5 +1,5 @@
 resource "proxmox_virtual_environment_vm" "pfsense" {
-  name        = "vm-pfsense"
+  name        = "Pfsense-Axelia"
   description = "Firewall pfSense - Site primaire"
   node_name   = var.proxmox_node
   vm_id       = var.pfsense_vm_id

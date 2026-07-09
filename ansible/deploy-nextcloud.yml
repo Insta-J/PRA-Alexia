@@ -1,17 +1,19 @@
 ---
-- name: Installation Nextcloud + MariaDB
+- name: Installation Nextcloud (base distante, sans restauration)
   hosts: nextcloud
   become: yes
 
   vars:
-    db_root_password: "{{ lookup('env', 'NC_DB_ROOT_PASSWORD') }}"
+    db_host: "{{ lookup('env', 'NC_DB_HOST') }}"
+    db_name: "{{ lookup('env', 'NC_DB_NAME') }}"
     db_user: "{{ lookup('env', 'NC_DB_USER') }}"
     db_password: "{{ lookup('env', 'NC_DB_PASSWORD') }}"
     admin_user: "{{ lookup('env', 'NC_ADMIN_USER') }}"
     admin_password: "{{ lookup('env', 'NC_ADMIN_PASSWORD') }}"
+    ncpa_token: "{{ lookup('env', 'NC_NCPA_TOKEN') }}"
 
   tasks:
-    # --- SSH ---
+    # --- Configuration Système & SSH ---
     - name: Autoriser le login root
       lineinfile:
         path: /etc/ssh/sshd_config
@@ -24,7 +26,7 @@
         state: restarted
         enabled: yes
 
-    # --- Ajouter le PPA PHP 8.2 ---
+    # --- Installation PHP 8.2 & Apache ---
     - name: Installer les prérequis pour le PPA
       apt:
         name: [software-properties-common, ca-certificates, lsb-release, apt-transport-https]
@@ -35,16 +37,10 @@
         repo: "ppa:ondrej/php"
         state: present
 
-    - name: Mettre à jour le cache après ajout du PPA
-      apt:
-        update_cache: yes
-
-    # --- Dépendances : Apache, PHP 8.2, MariaDB ---
-    - name: Installer les paquets
+    - name: Installer Apache et les modules PHP 8.2
       apt:
         name:
           - apache2
-          - mariadb-server
           - libapache2-mod-php8.2
           - php8.2
           - php8.2-gd
@@ -60,6 +56,7 @@
           - unzip
           - wget
           - python3-pymysql
+          - mariadb-client
         update_cache: yes
 
     - name: Activer PHP 8.2 pour Apache
@@ -68,51 +65,26 @@
         a2enmod php8.2
       ignore_errors: yes
 
-    # --- Configuration MariaDB ---
-    - name: Définir le mot de passe root MariaDB
-      mysql_user:
-        name: root
-        password: "{{ db_root_password }}"
-        login_unix_socket: /var/run/mysqld/mysqld.sock
-        state: present
-      ignore_errors: yes
-
-    - name: Créer la base Nextcloud
-      mysql_db:
-        name: nextcloud
-        state: present
-        login_user: root
-        login_password: "{{ db_root_password }}"
-
-    - name: Créer l'utilisateur Nextcloud
-      mysql_user:
-        name: "{{ db_user }}"
-        password: "{{ db_password }}"
-        priv: "nextcloud.*:ALL"
-        host: localhost
-        state: present
-        login_user: root
-        login_password: "{{ db_root_password }}"
-
-    # --- Télécharger et installer Nextcloud ---
+    # --- Déploiement du code Nextcloud ---
     - name: Télécharger Nextcloud
       get_url:
         url: https://download.nextcloud.com/server/releases/latest.zip
         dest: /tmp/nextcloud.zip
 
-    - name: Décompresser Nextcloud (unzip natif sur le LXC)
+    - name: Décompresser Nextcloud
       shell: unzip -o -q /tmp/nextcloud.zip -d /var/www/
       args:
         creates: /var/www/nextcloud
 
-    - name: Définir les permissions
+    - name: Créer le dossier data de stockage physique
       file:
-        path: /var/www/nextcloud
+        path: /var/www/nextcloud/data
+        state: directory
         owner: www-data
         group: www-data
-        recurse: yes
+        mode: '0770'
 
-    # --- Configurer Apache ---
+    # --- Configuration Réseau Apache ---
     - name: Créer le vhost Apache
       copy:
         dest: /etc/apache2/sites-available/nextcloud.conf
@@ -126,7 +98,7 @@
             </Directory>
           </VirtualHost>
 
-    - name: Activer le site et les modules
+    - name: Activer le site Nextcloud
       shell: |
         a2ensite nextcloud.conf
         a2enmod rewrite headers env dir mime
@@ -138,22 +110,83 @@
         name: apache2
         state: restarted
 
-    # --- Installation Nextcloud via occ ---
-    - name: Installer Nextcloud (occ)
+    # --- Permissions AVANT l'install (crucial : sinon "Cannot write config") ---
+    - name: Appliquer les permissions www-data avant install
+      file:
+        path: /var/www/nextcloud
+        owner: www-data
+        group: www-data
+        recurse: yes
+
+    # --- Installation Nextcloud (base vierge + config.php valide) ---
+    - name: Vérifier si Nextcloud est déjà installé
+      become_user: www-data
+      shell: |
+        php /var/www/nextcloud/occ status 2>/dev/null | grep -q 'installed: true'
+      register: nc_installed
+      failed_when: false
+      changed_when: false
+
+    - name: Initialiser Nextcloud via occ (installation de base)
       become_user: www-data
       shell: |
         php /var/www/nextcloud/occ maintenance:install \
           --database "mysql" \
-          --database-name "nextcloud" \
+          --database-host "{{ db_host }}" \
+          --database-name "{{ db_name }}" \
           --database-user "{{ db_user }}" \
           --database-pass "{{ db_password }}" \
           --admin-user "{{ admin_user }}" \
           --admin-pass "{{ admin_password }}"
-      args:
-        creates: /var/www/nextcloud/config/config.php
+      when: nc_installed.rc != 0
+      register: install_result
 
-    - name: Autoriser l'accès depuis le réseau (trusted domains)
+    - name: Afficher le résultat de l'installation
+      debug:
+        var: install_result.stdout_lines
+      when: install_result is defined and install_result.stdout_lines is defined
+
+    # --- Finalisation ---
+    - name: Appliquer les permissions www-data sur l'ensemble du dossier
+      file:
+        path: /var/www/nextcloud
+        owner: www-data
+        group: www-data
+        recurse: yes
+
+    - name: Assurer l'autorisation de l'IP du VLAN40 (trusted domains)
       become_user: www-data
       shell: |
-        php /var/www/nextcloud/occ config:system:set trusted_domains 1 --value="192.168.40.50"
+        php /var/www/nextcloud/occ config:system:set trusted_domains 0 --value="192.168.40.50"
       ignore_errors: yes
+
+    # === Agent NCPA (supervision par Nagios) ===
+    - name: Télécharger NCPA
+      get_url:
+        url: "https://assets.nagios.com/downloads/ncpa3/ncpa-latest-1.amd64.deb"
+        dest: /tmp/ncpa.deb
+
+    - name: Installer NCPA
+      apt:
+        deb: /tmp/ncpa.deb
+
+    - name: Configurer le token NCPA (section api)
+      community.general.ini_file:
+        path: /usr/local/ncpa/etc/ncpa.cfg
+        section: api
+        option: community_string
+        value: "{{ ncpa_token }}"
+        no_extra_spaces: yes
+      notify: restart ncpa
+
+    - name: Démarrer et activer NCPA
+      systemd:
+        name: ncpa
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: restart ncpa
+      systemd:
+        name: ncpa
+        state: restarted

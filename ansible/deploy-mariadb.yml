@@ -1,0 +1,107 @@
+---
+- name: Installation MariaDB (base distante vide pour Nextcloud)
+  hosts: mariadb
+  become: yes
+
+  vars:
+    db_root_password: "{{ lookup('env', 'DB_ROOT_PASSWORD') }}"
+    db_user: "{{ lookup('env', 'DB_USER') }}"
+    db_password: "{{ lookup('env', 'DB_PASSWORD') }}"
+    db_name: "{{ lookup('env', 'DB_NAME') | default('nextcloud', true) }}"
+    nextcloud_ip: "{{ lookup('env', 'NEXTCLOUD_IP') }}"
+    ncpa_token_db: "{{ lookup('env', 'NC_NCPADB_TOKEN') }}"
+
+  tasks:
+    - name: Autoriser le login root
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PermitRootLogin'
+        line: 'PermitRootLogin yes'
+
+    - name: Redémarrer SSH
+      systemd:
+        name: ssh
+        state: restarted
+        enabled: yes
+
+    - name: Installer MariaDB
+      apt:
+        name: [mariadb-server, python3-pymysql]
+        update_cache: yes
+
+    # --- Écoute sur toutes les interfaces (accès distant) ---
+    - name: Configurer MariaDB pour écouter sur le réseau
+      lineinfile:
+        path: /etc/mysql/mariadb.conf.d/50-server.cnf
+        regexp: '^bind-address'
+        line: 'bind-address = 0.0.0.0'
+      notify: restart mariadb
+
+    - name: Démarrer MariaDB
+      systemd:
+        name: mariadb
+        state: started
+        enabled: yes
+
+    - name: Définir le mot de passe root MariaDB
+      mysql_user:
+        name: root
+        password: "{{ db_root_password }}"
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        state: present
+      ignore_errors: yes
+
+    - name: Créer la base Nextcloud (vide)
+      mysql_db:
+        name: "{{ db_name }}"
+        state: present
+        login_user: root
+        login_password: "{{ db_root_password }}"
+
+    # --- Utilisateur avec accès depuis l'IP Nextcloud (Vlan40) ---
+    - name: Créer l'utilisateur Nextcloud (accès distant)
+      mysql_user:
+        name: "{{ db_user }}"
+        password: "{{ db_password }}"
+        update_password: always
+        priv: "{{ db_name }}.*:ALL"
+        host: "{{ nextcloud_ip }}"
+        state: present
+        login_user: root
+        login_password: "{{ db_root_password }}"
+
+    # === Agent NCPA (supervision par Nagios) ===
+    - name: Télécharger NCPA
+      get_url:
+        url: "https://assets.nagios.com/downloads/ncpa3/ncpa-latest-1.amd64.deb"
+        dest: /tmp/ncpa.deb
+
+    - name: Installer NCPA
+      apt:
+        deb: /tmp/ncpa.deb
+
+    - name: Configurer le token NCPA (section api)
+      community.general.ini_file:
+        path: /usr/local/ncpa/etc/ncpa.cfg
+        section: api
+        option: community_string
+        value: "{{ ncpa_token_db }}"
+        no_extra_spaces: yes
+      notify: restart ncpa
+
+    - name: Démarrer et activer NCPA
+      systemd:
+        name: ncpa
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: restart mariadb
+      systemd:
+        name: mariadb
+        state: restarted
+
+    - name: restart ncpa
+      systemd:
+        name: ncpa
+        state: restarted
