@@ -12,7 +12,7 @@ echo -e "${GREEN}=== PRA Vault — Déploiement + Restauration ===${NC}"
 [ -f .env ] || { echo -e "${RED}.env introuvable${NC}"; exit 1; }
 source .env
 
-# --- Détection automatique du dernier snapshot local ---
+# -- Détection automatique du dernier snapshot local ---
 # Cherche le fichier .snap le plus récent dans le dossier ansible/files/
 SNAPSHOT=$(ls -t ansible/files/vault-snapshot-*.snap 2>/dev/null | head -1 | xargs basename)
 
