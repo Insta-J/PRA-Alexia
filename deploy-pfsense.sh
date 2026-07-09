@@ -19,7 +19,7 @@ cd terraform/pfsense
 terraform init -input=false
 terraform apply -auto-approve
 
-# Détection de l'IP WAN via l'agent QEMU
+#  Détection de l'IP WAN via l'agent QEMU
 echo -e "${GREEN}[3/4] Détection de l'IP WAN de pfSense${NC}"
 PFSENSE_IP=""
 for i in $(seq 1 30); do
