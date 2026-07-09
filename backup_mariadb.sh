@@ -62,7 +62,7 @@ sshpass -p "$NC_LXC_PASSWORD" scp -o StrictHostKeyChecking=no \
   "$ARCHIVE_CONF"
 
 # =========================================================
-# [4/5] Envoi vers le NAS (les deux fichiers)
+# [4/5] Envoi vers le  NAS (les deux fichiers)
 # =========================================================
 echo -e "${GREEN}==> [4/5] Envoi vers le NAS${NC}"
 sshpass -p "$NAS_PWD" scp -o StrictHostKeyChecking=no "$ARCHIVE_SQL" "${NAS_USER}@${NAS_HOST}:${NAS_PATH}/"
