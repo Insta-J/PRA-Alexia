@@ -26,7 +26,7 @@
           la restauration (vault operator init + unseal).
           Voir le runbook.
 
-    - name: Restaurer le snapshot (nécessite Vault déverrouillé + login)
+    - name: Restaurer le snapshot (nécessite Vault déverrouillé+ login)
       shell: |
         export VAULT_ADDR={{ vault_addr }}
         export VAULT_TOKEN={{ vault_root_token }}
