@@ -37,7 +37,7 @@
         state: restarted
         enabled: yes
 
-    # --- Phase 2 : installer Vault ---
+    # -- Phase 2 : installer Vault ---
     - name: Installer les dépendances
       apt:
         name: [gnupg, curl, unzip]
