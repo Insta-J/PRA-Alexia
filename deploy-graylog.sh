@@ -23,7 +23,7 @@ vget() {
 }
 
 # =========================================================
-# [0/4] Récupération de TOUS les accès depuis Vault (AppRole)
+# [0/4]  Récupération de TOUS les accès depuis Vault (AppRole)
 # =========================================================
 echo -e "${GREEN}[0/4] Récupération des accès depuis Vault (AppRole)${NC}"
 
