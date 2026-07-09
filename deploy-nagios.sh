@@ -9,7 +9,7 @@ echo -e "${GREEN}=== Déploiement Nagios XI — PRA Alexia ===${NC}"
 [ -f .env ] || { echo -e "${RED}.env introuvable${NC}"; exit 1; }
 source .env
 
-# -- Helper : exécuter une commande Vault via SSH ---
+# - Helper : exécuter une commande Vault via SSH ---
 vault_cmd() {
   sshpass -p "$TF_VAR_vault_root_password" ssh \
     -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
