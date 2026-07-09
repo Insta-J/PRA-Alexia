@@ -21,7 +21,7 @@ vget() {
 }
 
 # =========================================================
-# [0/6] Récupération des accès depuis Vault
+#  [0/6] Récupération des accès depuis Vault
 # =========================================================
 echo -e "${GREEN}[0/6] Récupération des accès depuis Vault${NC}"
 VAULT_TOKEN=$(vault_cmd "vault write -field=token auth/approle/login \
