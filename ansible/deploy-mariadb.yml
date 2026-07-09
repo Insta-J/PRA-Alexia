@@ -29,7 +29,7 @@
         name: [mariadb-server, python3-pymysql]
         update_cache: yes
 
-    # --- Écoute sur toutes les interfaces (accès distant) ---
+    # -- Écoute sur toutes les interfaces (accès distant) ---
     - name: Configurer MariaDB pour écouter sur le réseau
       lineinfile:
         path: /etc/mysql/mariadb.conf.d/50-server.cnf
