@@ -4,7 +4,7 @@ resource "proxmox_virtual_environment_vm" "pfsense" {
   node_name   = var.proxmox_node
   vm_id       = var.pfsense_vm_id
 
-  # Agent QEMU pour récupérer l'IP DHCP
+ # Agent QEMU pour récupérer l'IP DHCP
   agent {
     enabled = true
   }
