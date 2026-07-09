@@ -44,7 +44,7 @@
       debug:
         var: users_check.stdout_lines
 
-- name: Restauration des données Nextcloud - Phase 3 (Finalisation Nextcloud)
+- name: Restauration des données Nextcloud - phase 3 (Finalisation Nextcloud)
   hosts: nextcloud
   become: yes
 

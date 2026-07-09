@@ -13,7 +13,7 @@
     ncpa_token: "{{ lookup('env', 'NC_NCPA_TOKEN') }}"
 
   tasks:
-    # --- Configuration Système & SSH ---
+    # -- Configuration Système & SSH ---
     - name: Autoriser le login root
       lineinfile:
         path: /etc/ssh/sshd_config
