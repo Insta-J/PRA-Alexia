@@ -1,4 +1,4 @@
-# --- BLOC D'ENTÊTE DU PLAY (SCÉNARIO) ---
+# -- BLOC D'ENTÊTE DU PLAY (SCÉNARIO) ---
 # Définit la cible (le groupe d'hôtes pfsense) et désactive la collecte de données système (gather_facts) pour accélérer le lancement.
 - name: Injection de la configuration pfSense complète
   hosts: pfsense
