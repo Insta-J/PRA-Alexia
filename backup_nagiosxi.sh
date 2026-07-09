@@ -48,7 +48,7 @@ sshpass -p "$NAGIOS_ROOT_PASSWORD" ssh -o StrictHostKeyChecking=no root@"$NAGIOS
   "tar -czf - /usr/local/nagios/etc /usr/local/nagios/var/retention.dat /usr/local/nagios/var/archives 2>/dev/null" > "$ARCHIVE_NAGIOS"
 
 # =========================================================
-# [3/4] Envoi vers le NAS
+# [3/4] Envoi vers le  NAS
 # =========================================================
 echo -e "${GREEN}==> [3/4] Envoi vers le NAS${NC}"
 
