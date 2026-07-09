@@ -1,3 +1,5 @@
+# --- EXIGENCES TERRAFORM & PROVIDERS ---
+# Déclaration et verrouillage des versions pour les providers Proxmox (bpg) et Vault (HashiCorp).
 terraform {
   required_providers {
     proxmox = {
@@ -11,6 +13,8 @@ terraform {
   }
 }
 
+# --- CONFIGURATION DU PROVIDER HASHICORP VAULT ---
+# Connexion à ton instance Vault et authentification sécurisée via la méthode AppRole.
 provider "vault" {
   address          = "http://192.168.50.4:8200"
   skip_child_token = true
@@ -24,6 +28,8 @@ provider "vault" {
   }
 }
 
+# --- ÉLÉMENTS DE DONNÉES (DATA SOURCES VAULT) ---
+# Récupération dynamique des secrets stockés dans le moteur KV (v2) pour Proxmox et Nextcloud.
 data "vault_kv_secret_v2" "proxmox" {
   mount = "kv"
   name  = "proxmox"
@@ -34,6 +40,8 @@ data "vault_kv_secret_v2" "nextcloud" {
   name  = "nextcloud"
 }
 
+# --- CONFIGURATION DU PROVIDER PROXMOX ---
+# Initialisation du provider Proxmox avec l'URL de l'API et le token d'accès extraits en direct de Vault.
 provider "proxmox" {
   endpoint  = data.vault_kv_secret_v2.proxmox.data["api_url"]
   api_token = data.vault_kv_secret_v2.proxmox.data["api_token"]
