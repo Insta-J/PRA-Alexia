@@ -52,7 +52,7 @@ MONGO_URI=$(sshpass -p "$GRAYLOG_ROOT_PASSWORD" ssh -o StrictHostKeyChecking=no 
 sshpass -p "$GRAYLOG_ROOT_PASSWORD" ssh -o StrictHostKeyChecking=no root@"$GRAYLOG_IP" \
   "mongodump --uri='${MONGO_URI}' --gzip --archive=-" > "$ARCHIVE_GRAYLOG"
 # =========================================================
-# [3/4] Envoi vers le NAS
+# [3/4] Envoi vers le  NAS
 # =========================================================
 echo -e "${GREEN}==> [3/4] Envoi vers le NAS${NC}"
 
