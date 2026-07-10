@@ -154,9 +154,6 @@ cp .env.example .env   # puis renseigner les accès Vault
 ```
 
 Chaque script d'orchestration enchaîne : authentification Vault → récupération des secrets → provisioning Terraform → configuration Ansible → (le cas échéant) restauration des données depuis le NAS.
-
-> **Note PRA** : après un redémarrage complet, Vault démarre *scellé*. Il doit être déverrouillé (clés unseal) avant tout déploiement de service, sans quoi les scripts ne pourront pas récupérer leurs secrets.
-
 ---
 
 ## 7. Sécurité des secrets
@@ -166,9 +163,3 @@ Chaque script d'orchestration enchaîne : authentification Vault → récupérat
 - Authentification des déploiements via **AppRole** (identifiants à durée de vie limitée).
 - Le fichier `.env` (accès Vault) reste strictement local et n'est jamais versionné.
 
----
-
-## 8. Auteurs
-
-- Prénom NOM
-- Prénom NOM (binôme)
