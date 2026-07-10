@@ -21,7 +21,7 @@ L'objectif : à partir d'un hôte Proxmox vierge et d'un kit d'amorçage minimal
 | pfSense | Pare-feu, segmentation, VPN sortant | VM (template cloné) | Passerelle multi-VLAN |
 | HashiCorp Vault | Coffre-fort de secrets (backend Raft, AppRole) | LXC | Vlan50 |
 | Nagios XI | Supervision, centralisation des alertes | LXC | Vlan50 |
-| Graylog | Centralisation des logs (MongoDB + OpenSearch) | LXC | Vlan50 |
+| Graylog | Centralisation des logs (MongoDB + OpenSearch) + SIEM | LXC | Vlan50 |
 | MariaDB | Base de données Nextcloud (dédiée) | LXC | Vlan50 |
 | Nextcloud | Stockage de fichiers, base distante | LXC | Vlan40 |
 
