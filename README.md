@@ -34,8 +34,8 @@ L'objectif : à partir d'un hôte Proxmox vierge et d'un kit d'amorçage minimal
 
 L'architecture repose sur deux hyperviseurs Proxmox, répartis sur deux sites distincts :
 
-- **Proxmox 1 — Site primaire** : héberge les services de production (pare-feu, base de données, supervision, centralisation des logs).
-- **Proxmox 2 — Site secondaire** : joue le rôle d'endpoint VPN, de dépôt de sauvegardes externalisées et de récepteur de logs.
+- **Proxmox  — Site primaire** : héberge les services de production (pare-feu, base de données, supervision, centralisation des logs).
+- **Proxmox  — Site secondaire** : joue le rôle d'endpoint VPN, de dépôt de sauvegardes externalisées et de récepteur de logs.
 
 ### Segmentation réseau
 
