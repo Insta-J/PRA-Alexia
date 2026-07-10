@@ -1,4 +1,4 @@
-# PRA-Alexia — Infrastructure as Code
+#  PRA-Alexia — Infrastructure as Code
 
 Déploiement automatisé et reproductible d'une architecture sécurisée dans le cadre d'un **Plan de Reprise d'Activité (PRA)**, réalisé avec **Terraform**, **Ansible** et **HashiCorp Vault** sur **Proxmox VE**.
 
