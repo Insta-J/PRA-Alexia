@@ -40,10 +40,10 @@ L'architecture repose sur deux hyperviseurs Proxmox, répartis sur deux sites di
 
 | Zone | Bridge | Sous-réseau |
 |------|--------|-------------|
-| DMZ | Vlan20 | 192.168.20.0/24 |
-| LAN serveurs | Vlan30 | 192.168.30.0/24 |
-| Administration | Vlan40 | 192.168.40.0/24 |
-| Supervision | Vlan50 | 192.168.50.0/24 |
+| Utilisateurs | Vlan20 | 192.168.20.0/24 |
+| Administrations | Vlan30 | 192.168.30.0/24 |
+| DMZ | Vlan40 | 192.168.40.0/24 |
+| Serveurs | Vlan50 | 192.168.50.0/24 |
 
 Chaque VLAN est routé et filtré par pfSense. Les flux inter-VLAN (par exemple Nextcloud en Vlan40 vers sa base MariaDB en Vlan50 sur le port 3306, ou la supervision NCPA vers le Vlan40 sur le port 5693) font l'objet de règles explicites.
 
