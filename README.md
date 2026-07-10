@@ -24,7 +24,6 @@ L'objectif : à partir d'un hôte Proxmox vierge et d'un kit d'amorçage minimal
 | Graylog | Centralisation des logs (MongoDB + OpenSearch) | LXC | Vlan50 |
 | MariaDB | Base de données Nextcloud (dédiée) | LXC | Vlan50 |
 | Nextcloud | Stockage de fichiers, base distante | LXC | Vlan40 |
-| Duplicati | Sauvegarde et externalisation vers le NAS | LXC | Vlan50 |
 
 ---
 
@@ -34,8 +33,8 @@ L'objectif : à partir d'un hôte Proxmox vierge et d'un kit d'amorçage minimal
 
 L'architecture repose sur deux hyperviseurs Proxmox, répartis sur deux sites distincts :
 
-- **Proxmox  — Site primaire** : héberge les services de production (pare-feu, base de données, supervision, centralisation des logs).
-- **Proxmox  — Site secondaire** : joue le rôle d'endpoint VPN, de dépôt de sauvegardes externalisées et de récepteur de logs.
+- **Proxmox 1 — Site primaire** : héberge les services de production (pare-feu, base de données, supervision, centralisation des logs).
+- **Proxmox 2 — Site secondaire** : joue le rôle d'endpoint VPN, de dépôt de sauvegardes externalisées et de récepteur de logs.
 
 ### Segmentation réseau
 
@@ -74,12 +73,23 @@ Un tunnel **WireGuard** relie les deux sites. Le client (initiateur) est porté 
 
 ## 4. Prérequis
 
-- Proxmox VE 8.x
+### Environnement Proxmox
+
+- Proxmox VE 8.x sur les deux sites
+- Un **template pfSense vierge** (VM clonable), servant de base au déploiement du pare-feu
+- Un **template LXC Ubuntu 22.04**, servant de base aux conteneurs de services (Vault, Nagios, Graylog, MariaDB, Nextcloud)
+- Compte de service Proxmox (token API + accès SSH)
+
+### Outils d'automatisation
+
 - Terraform >= 1.5 (providers `bpg/proxmox`, `hashicorp/vault`)
 - Ansible (collections `community.general`, `community.proxmox`)
-- HashiCorp Vault initialisé et déverrouillé
-- Compte de service Proxmox (token API + accès SSH)
 - Utilitaires : `sshpass`, `jq`, `passlib`
+
+### Secrets
+
+- HashiCorp Vault initialisé et déverrouillé
+- Fichier `.env` local (kit d'amorçage) renseigné avec les accès Vault
 
 ---
 
