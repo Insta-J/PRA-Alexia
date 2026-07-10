@@ -24,10 +24,18 @@ L'objectif : à partir d'un hôte Proxmox vierge et d'un kit d'amorçage minimal
 | Graylog | Centralisation des logs (MongoDB + OpenSearch) | LXC | Vlan50 |
 | MariaDB | Base de données Nextcloud (dédiée) | LXC | Vlan50 |
 | Nextcloud | Stockage de fichiers, base distante | LXC | Vlan40 |
+| Duplicati | Sauvegarde et externalisation vers le NAS | LXC | Vlan50 |
 
 ---
 
 ## 3. Architecture
+
+### Hyperviseurs
+
+L'architecture repose sur deux hyperviseurs Proxmox, répartis sur deux sites distincts :
+
+- **Proxmox 1 — Site primaire** : héberge les services de production (pare-feu, base de données, supervision, centralisation des logs).
+- **Proxmox 2 — Site secondaire** : joue le rôle d'endpoint VPN, de dépôt de sauvegardes externalisées et de récepteur de logs.
 
 ### Segmentation réseau
 
@@ -44,13 +52,23 @@ Chaque VLAN est routé et filtré par pfSense. Les flux inter-VLAN (par exemple 
 
 Tous les secrets (mots de passe, tokens, clés) sont stockés dans **HashiCorp Vault** (moteur KV v2). Les déploiements s'authentifient via **AppRole** et récupèrent les secrets à la volée. Seul un fichier `.env` local (kit d'amorçage), non versionné, contient le secret zéro permettant de contacter Vault.
 
-### Supervision
+### Supervision et centralisation des logs
 
-L'agent **NCPA** est installé sur chaque composant (Graylog, MariaDB, Nextcloud, Vault). Nagios interroge les agents pour surveiller les services et les ressources (CPU, mémoire, disque). Les logs applicatifs (dont ceux de Nagios) sont centralisés vers Graylog via rsyslog.
+L'agent **NCPA** est installé sur chaque composant (Graylog, MariaDB, Nextcloud, Vault). Nagios interroge les agents pour surveiller les services et les ressources (CPU, mémoire, disque). En parallèle, les logs applicatifs et système (Nagios, pfSense, Duplicati, etc.) sont centralisés vers **Graylog** via rsyslog.
+
+### Détection de sécurité (SIEM)
+
+Au-delà de la simple centralisation, Graylog assure un rôle de **SIEM**. Il permet de définir des alertes personnalisées à partir des logs collectés : par exemple, surveiller les journaux de connexion de pfSense afin de détecter une tentative de force brute (répétition d'échecs d'authentification) et de la remonter en temps réel.
 
 ### Sauvegarde et restauration
 
-Les données critiques (base MariaDB, configuration Nextcloud, dumps MongoDB de Graylog, configurations Nagios) sont sauvegardées et externalisées vers un **NAS Synology** en SFTP, avec politique de rétention. La restauration est automatisée : au redéploiement, les scripts récupèrent la dernière sauvegarde et réinjectent les données.
+Les données critiques (base MariaDB, configuration Nextcloud, dumps MongoDB de Graylog, configurations Nagios), ainsi que les LXC et VM Proxmox, sont sauvegardées vers un **NAS Synology** en SFTP, avec une politique de rétention. La restauration est automatisée : au redéploiement, les scripts récupèrent la dernière sauvegarde et réinjectent les données.
+
+Les sauvegardes du NAS primaire sont ensuite **externalisées** vers un second NAS, situé sur le site secondaire, à travers le tunnel chiffré inter-sites. On obtient ainsi une double copie géographiquement séparée, conforme à la logique d'un PRA.
+
+### Interconnexion des sites
+
+Un tunnel **WireGuard** relie les deux sites. Le client (initiateur) est porté par pfSense sur le site primaire, le serveur se trouvant côté site secondaire. Ce tunnel transporte la réplication des sauvegardes et l'acheminement des logs vers le site distant, le tout de manière chiffrée.
 
 ---
 
