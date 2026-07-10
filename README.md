@@ -154,7 +154,6 @@ cp .env.example .env   # puis renseigner les accès Vault
 ```
 
 Chaque script d'orchestration enchaîne : authentification Vault → récupération des secrets → provisioning Terraform → configuration Ansible → (le cas échéant) restauration des données depuis le NAS.
----
 
 ## 7. Sécurité des secrets
 
